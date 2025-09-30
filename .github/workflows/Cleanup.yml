@@ -1,0 +1,41 @@
+name: Cleanup
+
+on:
+  #schedule:
+    #- cron: '0 0 * * *' 
+  workflow_dispatch:    
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh jq
+
+      - name: Authenticate gh
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Delete old releases and tags
+        run: |
+          cutoff=$(date -d '14 days ago' +%s)
+
+          gh api repos/${{ github.repository }}/releases --paginate \
+          | jq -c '.[] | {id: .id, tag_name: .tag_name, created_at: .created_at}' \
+          | while read release; do
+              created=$(echo $release | jq -r '.created_at')
+              created_ts=$(date -d "$created" +%s)
+              if [ $created_ts -lt $cutoff ]; then
+                id=$(echo $release | jq -r '.id')
+                tag=$(echo $release | jq -r '.tag_name')
+                echo "Deleting release $id (tag: $tag)..."
+                gh api --method DELETE repos/${{ github.repository }}/releases/$id
+                echo "Deleting tag $tag..."
+                gh api --method DELETE repos/${{ github.repository }}/git/refs/tags/$tag || true
+              fi
+            done
